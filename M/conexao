@@ -2469,7 +2469,11 @@ echo -e "\033[0;34m┏━━━━━━━━━━━━━━━━━━━�
 			;;
 			13)
 			clear
-			menu
+			if [[ ! -e /usr/local/bin/xray ]]; then
+				bash <(wget -qO- https://raw.githubusercontent.com/vitorfworlds/sshplus-real/main/M/xray)
+			else
+				bash /etc/SSHPlus/M/xray
+			fi
 			;;
 			0 | 00)
 			clear
