@@ -2472,7 +2472,7 @@ echo -e "\033[0;34m┏━━━━━━━━━━━━━━━━━━━�
 			if [[ ! -e /usr/local/bin/xray ]]; then
 				bash <(wget -qO- https://raw.githubusercontent.com/vitorfworlds/sshplus-real/main/M/xray)
 			else
-				bash /etc/SSHPlus/M/xray
+				bash /etc/SSHPlus/M/xraymanager
 			fi
 			;;
 			0 | 00)
@@ -2482,6 +2482,7 @@ echo -e "\033[0;34m┏━━━━━━━━━━━━━━━━━━━�
 			exit
 				;;
 			*)
+			
 			clear
 			echo -e "\033[1;31mOpcao invalida !\033[0m"
 			sleep 0.5

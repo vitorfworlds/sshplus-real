@@ -1,524 +1,153 @@
 #!/bin/bash
-# Script de Gerenciamento Avançado do Xray
+# Script de Gerenciamento do Xray
 # Autor: Claude
 # Versão: 1.0
 
-# Verificar se é root
-[[ $EUID -ne 0 ]] && {
-    echo -e "\033[1;31mPrecisa executar como root\033[0m"
-    exit 1
-}
-
-# Cores e formatação
-cor1='\033[41;1;37m'
-cor2='\033[44;1;37m'
-scor='\033[0m'
+# Cores
+RED='\033[1;31m'
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
-RED='\033[1;31m'
-BLUE='\033[0;34m'
 CYAN='\033[1;36m'
-NC='\033[0m'
+CORTITLE='\033[1;41m'
+DIR='/etc/SSHPlus'
+SCOLOR='\033[0m'
 
-# Diretórios
-DIR_XRAY="/etc/xray"
-DIR_CONFIG="/usr/local/etc/xray"
-DIR_BACKUP="/etc/SSHPlus/xray/backup"
-USRdatabase="/etc/SSHPlus/RegXray"
-
-# Criar diretórios necessários
-[[ ! -d /etc/SSHPlus/xray ]] && mkdir -p /etc/SSHPlus/xray
-[[ ! -d ${DIR_BACKUP} ]] && mkdir -p ${DIR_BACKUP}
-
-# Função para backup
-backup_config() {
-    cp ${DIR_CONFIG}/config.json ${DIR_BACKUP}/config.json.bak
-    cp ${USRdatabase} ${DIR_BACKUP}/users.db.bak
-}
-
-# Função para restaurar backup
-restore_config() {
-    [[ -f ${DIR_BACKUP}/config.json.bak ]] && cp ${DIR_BACKUP}/config.json.bak ${DIR_CONFIG}/config.json
-    [[ -f ${DIR_BACKUP}/users.db.bak ]] && cp ${DIR_BACKUP}/users.db.bak ${USRdatabase}
-}
-
-# Função para verificar porta
-check_port() {
-    local port=$1
-    if netstat -tunlp | grep -q ":$port "; then
-        echo -e "\n${RED}Porta $port já está em uso!${NC}"
-        return 1
+# Funções
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Este script precisa ser executado como root${SCOLOR}"
+        exit 1
     fi
-    return 0
 }
 
-# Função para instalar
-installxray() {
-    clear
-    echo -e "${cor2}              INSTALADOR XRAY               ${scor}"
-    echo -e "\n${YELLOW}INICIANDO INSTALAÇÃO... ${NC}"
+add_user() {
+    echo -e "${YELLOW}Adicionando novo usuário...${SCOLOR}"
     
-    # Verificar dependências
-    apt update
-    apt install -y curl wget unzip jq openssl
-
-    # Backup se existir instalação anterior
-    [[ -d ${DIR_CONFIG} ]] && backup_config
-
-    # Download e instalação do Xray
-    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
-
-    # Configuração inicial
-    cat > ${DIR_CONFIG}/config.json << EOF
-{
-  "log": {
-    "loglevel": "warning",
-    "access": "/var/log/xray/access.log",
-    "error": "/var/log/xray/error.log"
-  },
-  "inbounds": [
-    {
-      "port": 443,
-      "protocol": "vmess",
-      "settings": {
-        "clients": []
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "none",
-        "tcpSettings": {
-          "header": {
-            "type": "http",
-            "response": {
-              "version": "1.1",
-              "status": "200",
-              "reason": "OK",
-              "headers": {
-                "Content-Type": ["application/octet-stream", "application/x-msdownload", "text/html", "application/x-shockwave-flash"],
-                "Transfer-Encoding": ["chunked"],
-                "Connection": ["keep-alive"],
-                "Pragma": "no-cache"
-              }
-            }
-          }
-        }
-      }
-    }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom",
-      "settings": {}
-    }
-  ]
-}
-EOF
-
-    # Criar banco de dados
-    [[ ! -e ${USRdatabase} ]] && touch ${USRdatabase}
-
-    # Configurar serviço
-    systemctl enable xray
-    systemctl start xray
-
-    echo -e "\n${GREEN}XRAY INSTALADO COM SUCESSO!${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
-}
-
-# Função para adicionar usuário
-addusr() {
-    clear
-    echo -e "${cor2}           ADICIONAR USUARIO XRAY            ${scor}"
+    read -p "Nome do usuário: " username
+    if [[ -z "$username" ]]; then
+        echo -e "${RED}Nome de usuário inválido!${SCOLOR}"
+        sleep 2
+        return
+    fi
     
     # Gerar UUID
-    UUID=$(xray uuid)
+    UUID=$(cat /proc/sys/kernel/random/uuid)
     
-    # Solicitar dados
-    while true; do
-        echo -ne "\n${CYAN}Nome do usuário: ${NC}"
-        read nick
-        nick=$(echo $nick | sed 's/[^a-zA-Z0-9]//g')
-        
-        if [[ -z $nick ]]; then
-            echo -e "${RED}Nome inválido!${NC}"
-            continue
-        elif [[ ${#nick} -lt 3 || ${#nick} -gt 20 ]]; then
-            echo -e "${RED}Nome deve ter entre 3 e 20 caracteres!${NC}"
-            continue
-        elif grep -q "|$nick|" ${USRdatabase}; then
-            echo -e "${RED}Usuário já existe!${NC}"
-            continue
-        fi
-        break
-    done
-
-    while true; do
-        echo -ne "\n${CYAN}Dias de duração: ${NC}"
-        read dias
-        
-        if [[ ! $dias =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}Digite apenas números!${NC}"
-            continue
-        elif [[ $dias -lt 1 || $dias -gt 365 ]]; then
-            echo -e "${RED}Duração deve ser entre 1 e 365 dias!${NC}"
-            continue
-        fi
-        break
-    done
-
-    # Calcular data de expiração
-    exp_date=$(date -d "+$dias days" +%Y-%m-%d)
+    # Adicionar usuário ao config.json
+    jq --arg uuid "$UUID" --arg user "$username" '.inbounds[0].settings.clients += [{"id": $uuid, "email": $user}]' /usr/local/etc/xray/config.json > /usr/local/etc/xray/config.json.tmp
+    mv /usr/local/etc/xray/config.json.tmp /usr/local/etc/xray/config.json
     
-    # Adicionar ao config.json
-    jq --arg uuid "$UUID" \
-       '.inbounds[0].settings.clients += [{"id": $uuid, "level": 1}]' \
-       ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
-
-    # Registrar no banco
-    echo "$UUID|$nick|$exp_date" >> ${USRdatabase}
-    
-    # Backup
-    backup_config
-    
-    # Reiniciar serviço
     systemctl restart xray
-
-    clear
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}         USUÁRIO CRIADO COM SUCESSO!${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}UUID: ${NC}$UUID"
-    echo -e "${YELLOW}Usuário: ${NC}$nick"
-    echo -e "${YELLOW}Expira em: ${NC}$exp_date"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
+    
+    echo -e "${GREEN}Usuário adicionado com sucesso!${SCOLOR}"
+    echo -e "UUID: ${UUID}"
+    sleep 3
+    menu_xray
 }
 
-# Função para remover usuário
-delusr() {
-    clear
-    echo -e "${cor2}            REMOVER USUARIO XRAY            ${scor}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+remove_user() {
+    echo -e "${YELLOW}Removendo usuário...${SCOLOR}"
     
     # Listar usuários
-    echo -e "${YELLOW}USUÁRIOS REGISTRADOS:${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo "Usuários disponíveis:"
+    jq -r '.inbounds[0].settings.clients[] | .email' /usr/local/etc/xray/config.json | nl
     
-    while IFS='|' read -r uuid user exp; do
-        [[ -z $uuid ]] && continue
-        echo -e "${CYAN}$user${NC} - ${YELLOW}$uuid${NC}"
-    done < ${USRdatabase}
+    read -p "Digite o número do usuário que deseja remover: " user_number
     
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -ne "${CYAN}Digite o UUID do usuário: ${NC}"
-    read uuid
-
-    if grep -q "^$uuid|" ${USRdatabase}; then
-        # Remover do config.json
-        jq --arg uuid "$uuid" \
-           '.inbounds[0].settings.clients = [.inbounds[0].settings.clients[] | select(.id != $uuid)]' \
-           ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
+    if [[ -n "$user_number" ]]; then
+        username=$(jq -r ".inbounds[0].settings.clients[$((user_number-1))].email" /usr/local/etc/xray/config.json)
+        jq "del(.inbounds[0].settings.clients[$((user_number-1))])" /usr/local/etc/xray/config.json > /usr/local/etc/xray/config.json.tmp
+        mv /usr/local/etc/xray/config.json.tmp /usr/local/etc/xray/config.json
         
-        # Remover do banco
-        sed -i "/^$uuid|/d" ${USRdatabase}
-        
-        # Backup
-        backup_config
-        
-        # Reiniciar serviço
         systemctl restart xray
         
-        echo -e "\n${GREEN}USUÁRIO REMOVIDO COM SUCESSO!${NC}"
+        echo -e "${GREEN}Usuário $username removido com sucesso!${SCOLOR}"
     else
-        echo -e "\n${RED}UUID NÃO ENCONTRADO!${NC}"
+        echo -e "${RED}Número de usuário inválido!${SCOLOR}"
     fi
     
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
+    sleep 2
+    menu_xray
 }
 
-# Função para listar usuários
-listusers() {
-    clear
-    echo -e "${cor2}            USUÁRIOS XRAY REGISTRADOS        ${scor}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+show_status() {
+    echo -e "${YELLOW}Status do Xray:${SCOLOR}"
+    echo ""
+    echo -e "Serviço: $(systemctl is-active xray)"
+    echo -e "Porta: $(jq -r '.inbounds[0].port' /usr/local/etc/xray/config.json)"
+    echo -e "Protocolo: $(jq -r '.inbounds[0].protocol' /usr/local/etc/xray/config.json)"
+    echo ""
+    echo "Usuários:"
+    jq -r '.inbounds[0].settings.clients[] | "- \(.email) (\(.id))"' /usr/local/etc/xray/config.json
+    echo ""
+    read -p "Pressione Enter para continuar..."
+    menu_xray
+}
+
+configure_port() {
+    echo -e "${YELLOW}Configurando porta...${SCOLOR}"
+    current_port=$(jq -r '.inbounds[0].port' /usr/local/etc/xray/config.json)
+    echo -e "Porta atual: $current_port"
+    read -p "Digite a nova porta: " port
     
-    if [[ ! -s ${USRdatabase} ]]; then
-        echo -e "${RED}NENHUM USUÁRIO REGISTRADO!${NC}"
+    if [[ -n "$port" ]]; then
+        jq --arg port "$port" '.inbounds[0].port = ($port|tonumber)' /usr/local/etc/xray/config.json > /usr/local/etc/xray/config.json.tmp
+        mv /usr/local/etc/xray/config.json.tmp /usr/local/etc/xray/config.json
+        
+        systemctl restart xray
+        
+        echo -e "${GREEN}Porta alterada com sucesso!${SCOLOR}"
     else
-        echo -e "${CYAN}UUID | USUÁRIO | VENCIMENTO | STATUS${NC}"
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        while IFS='|' read -r uuid user exp; do
-            [[ -z $uuid ]] && continue
-            
-            if [[ $(date -d "$exp" +%s) -lt $(date +%s) ]]; then
-                status="${RED}VENCIDO${NC}"
-            else
-                status="${GREEN}ATIVO${NC}"
-            fi
-            
-            echo -e "${YELLOW}$uuid ${NC}| ${CYAN}$user ${NC}| ${YELLOW}$exp ${NC}| $status"
-        done < ${USRdatabase}
+        echo -e "${RED}Porta inválida!${SCOLOR}"
     fi
     
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
+    sleep 2
+    menu_xray
 }
 
-# Função para alterar porta
-changeport() {
-    clear
-    echo -e "${cor2}            ALTERAR PORTA XRAY             ${scor}"
+uninstall_xray() {
+    echo -e "${YELLOW}Desinstalando Xray...${SCOLOR}"
     
-    current_port=$(jq -r '.inbounds[0].port' ${DIR_CONFIG}/config.json)
-    echo -e "\n${YELLOW}PORTA ATUAL: ${GREEN}$current_port${NC}"
+    systemctl stop xray
+    systemctl disable xray
+    rm -f /etc/systemd/system/xray.service
+    rm -rf /usr/local/bin/xray
+    rm -rf /usr/local/etc/xray
     
-    while true; do
-        echo -ne "\n${CYAN}NOVA PORTA: ${NC}"
-        read port
-        
-        if [[ ! $port =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}Digite apenas números!${NC}"
-            continue
-        elif [[ $port -lt 1 || $port -gt 65535 ]]; then
-            echo -e "${RED}Porta deve estar entre 1 e 65535!${NC}"
-            continue
-        elif ! check_port $port; then
-            continue
-        fi
-        break
-    done
-    
-    # Backup antes da alteração
-    backup_config
-    
-    # Alterar porta
-    jq --arg port "$port" \
-       '.inbounds[0].port = ($port|tonumber)' \
-       ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
-    
-    # Reiniciar serviço
-    systemctl restart xray
-    
-    echo -e "\n${GREEN}PORTA ALTERADA COM SUCESSO!${NC}"
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
-}
-
-# Função para configurar TLS
-configtls() {
-    clear
-    echo -e "${cor2}            CONFIGURAR TLS XRAY            ${scor}"
-    
-    current_tls=$(jq -r '.inbounds[0].streamSettings.security' ${DIR_CONFIG}/config.json)
-    
-    if [[ "$current_tls" == "tls" ]]; then
-        echo -e "\n${YELLOW}TLS ESTÁ ATIVADO. DESEJA DESATIVAR? [s/n]${NC}"
-        read -p " " -e -i n response
-        
-        if [[ "$response" = "s" ]]; then
-            # Backup
-            backup_config
-            
-            # Desativar TLS
-            jq '.inbounds[0].streamSettings.security = "none" | 
-                del(.inbounds[0].streamSettings.tlsSettings)' \
-                ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
-            
-            echo -e "\n${GREEN}TLS DESATIVADO COM SUCESSO!${NC}"
-        fi
-    else
-        echo -e "\n${YELLOW}TLS ESTÁ DESATIVADO. DESEJA ATIVAR? [s/n]${NC}"
-        read -p " " -e -i n response
-        
-        if [[ "$response" = "s" ]]; then
-            echo -ne "\n${CYAN}INFORME SEU DOMÍNIO: ${NC}"
-            read domain
-            
-            # Backup
-            backup_config
-            
-            # Gerar certificado
-            mkdir -p /etc/xray/cert
-            openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
-                -subj "/C=BR/ST=SP/L=SP/O=Xray/CN=$domain" \
-                -keyout /etc/xray/cert/private.key \
-                -out /etc/xray/cert/cert.crt
-            
-            # Ativar TLS
-            jq --arg domain "$domain" \
-               '.inbounds[0].streamSettings.security = "tls" |
-                .inbounds[0].streamSettings.tlsSettings = {
-                    "certificates": [{
-                        "certificateFile": "/etc/xray/cert/cert.crt",
-                        "keyFile": "/etc/xray/cert/private.key"
-                    }]
-                }' \
-                ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
-            
-            echo -e "\n${GREEN}TLS ATIVADO COM SUCESSO!${NC}"
-        fi
-    fi
-    
-    # Reiniciar serviço
-    systemctl restart xray
-    
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
-}
-
-# Função para configurar protocolo
-configproto() {
-    clear
-    echo -e "${cor2}            CONFIGURAR PROTOCOLO XRAY            ${scor}"
-    
-    current_proto=$(jq -r '.inbounds[0].protocol' ${DIR_CONFIG}/config.json)
-    echo -e "\n${YELLOW}PROTOCOLO ATUAL: ${GREEN}$current_proto${NC}"
-    
-    echo -e "\n${CYAN}PROTOCOLOS DISPONÍVEIS:${NC}"
-    echo -e "${YELLOW}1${NC}) VMess"
-    echo -e "${YELLOW}2${NC}) VLESS"
-    echo -e "${YELLOW}3${NC}) Trojan"
-    echo -ne "\n${CYAN}Escolha uma opção: ${NC}"
-    read option
-
-    case $option in
-        1)
-            proto="vmess"
-            ;;
-        2)
-            proto="vless"
-            ;;
-        3)
-            proto="trojan"
-            ;;
-        *)
-            echo -e "${RED}Opção inválida!${NC}"
-            read -p "Pressione Enter para continuar" enter
-            configproto
-            return
-            ;;
-    esac
-
-    # Backup
-    backup_config
-    
-    # Alterar protocolo
-    jq --arg proto "$proto" \
-       '.inbounds[0].protocol = $proto' \
-       ${DIR_CONFIG}/config.json > /tmp/config.tmp && mv /tmp/config.tmp ${DIR_CONFIG}/config.json
-    
-    # Reiniciar serviço
-    systemctl restart xray
-    
-    echo -e "\n${GREEN}PROTOCOLO ALTERADO COM SUCESSO!${NC}"
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
-}
-
-# Função para desinstalar
-uninstallxray() {
-    clear
-    echo -e "${cor2}            DESINSTALAR XRAY              ${scor}"
-    
-    echo -e "\n${YELLOW}DESEJA REMOVER O XRAY? [s/n]${NC}"
-    read -p " " -e -i n response
-    
-    if [[ "$response" = "s" ]]; then
-        # Backup antes de remover
-        backup_config
-        
-        # Parar e desabilitar serviço
-        systemctl stop xray
-        systemctl disable xray
-        
-        # Remover arquivos
-        rm -rf ${DIR_CONFIG}
-        rm -rf ${DIR_XRAY}
-        rm -rf /etc/SSHPlus/xray
-        rm -f ${USRdatabase}
-        
-        # Desinstalar Xray
-        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove
-        
-        echo -e "\n${GREEN}XRAY REMOVIDO COM SUCESSO!${NC}"
-    fi
-    
-    read -p "Pressione Enter para continuar" enter
-    fun_xraymanager
+    echo -e "${GREEN}Xray desinstalado com sucesso!${SCOLOR}"
+    sleep 2
+    conexao
 }
 
 # Menu principal
-fun_xraymanager() {
+menu_xray() {
     clear
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${cor2}              GERENCIAR XRAY              ${scor}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    if [[ -e ${DIR_CONFIG}/config.json ]]; then
-        xray_port=$(jq -r '.inbounds[0].port' ${DIR_CONFIG}/config.json)
-        xray_proto=$(jq -r '.inbounds[0].protocol' ${DIR_CONFIG}/config.json)
-        xray_tls=$(jq -r '.inbounds[0].streamSettings.security' ${DIR_CONFIG}/config.json)
-        
-        echo -e "${YELLOW}PORTA: ${GREEN}$xray_port${NC}"
-        echo -e "${YELLOW}PROTOCOLO: ${GREEN}$xray_proto${NC}"
-        echo -e "${YELLOW}TLS: ${GREEN}$xray_tls${NC}"
-        
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "\033[1;31m[\033[1;36m01\033[1;31m] \033[1;37m• \033[1;33mADICIONAR USUARIO"
-        echo -e "\033[1;31m[\033[1;36m02\033[1;31m] \033[1;37m• \033[1;33mREMOVER USUARIO"
-        echo -e "\033[1;31m[\033[1;36m03\033[1;31m] \033[1;37m• \033[1;33mLISTAR USUARIOS"
-        echo -e "\033[1;31m[\033[1;36m04\033[1;31m] \033[1;37m• \033[1;33mALTERAR PORTA"
-        echo -e "\033[1;31m[\033[1;36m05\033[1;31m] \033[1;37m• \033[1;33mCONFIGURAR TLS"
-        echo -e "\033[1;31m[\033[1;36m06\033[1;31m] \033[1;37m• \033[1;33mCONFIGURAR PROTOCOLO"
-        echo -e "\033[1;31m[\033[1;36m07\033[1;31m] \033[1;37m• \033[1;33mDESINSTALAR XRAY"
-        echo -e "\033[1;31m[\033[1;36m00\033[1;31m] \033[1;37m• \033[1;33mVOLTAR"
-    else
-        echo -e "\033[1;31m[\033[1;36m01\033[1;31m] \033[1;37m• \033[1;33mINSTALAR XRAY"
-        echo -e "\033[1;31m[\033[1;36m00\033[1;31m] \033[1;37m• \033[1;33mVOLTAR"
-    fi
-    
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -ne "${GREEN}OQUE DESEJA FAZER ${YELLOW}?${NC} "
+    echo -e "\E[44;1;37m              GERENCIAMENTO XRAY               \E[0m"
+    echo -e "\033[1;32m[\033[1;36m01\033[1;32m] \033[1;37m• \033[1;33mADICIONAR USUARIO \033[1;32m"
+    echo -e "\033[1;32m[\033[1;36m02\033[1;32m] \033[1;37m• \033[1;33mREMOVER USUARIO \033[1;32m"
+    echo -e "\033[1;32m[\033[1;36m03\033[1;32m] \033[1;37m• \033[1;33mVER STATUS \033[1;32m"
+    echo -e "\033[1;32m[\033[1;36m04\033[1;32m] \033[1;37m• \033[1;33mALTERAR PORTA \033[1;32m"
+    echo -e "\033[1;32m[\033[1;36m05\033[1;32m] \033[1;37m• \033[1;33mDESINSTALAR XRAY \033[1;32m"
+    echo -e "\033[1;32m[\033[1;36m00\033[1;32m] \033[1;37m• \033[1;33mVOLTAR \033[1;32m"
+    echo ""
+    echo -ne "\033[1;32mO QUE DESEJA FAZER \033[1;33m?\033[1;37m "
     read option
-
+    
     case $option in
-        1|01)
-            [[ -e ${DIR_CONFIG}/config.json ]] && addusr || installxray
-            ;;
-        2|02)
-            [[ -e ${DIR_CONFIG}/config.json ]] && delusr
-            ;;
-        3|03)
-            [[ -e ${DIR_CONFIG}/config.json ]] && listusers
-            ;;
-        4|04)
-            [[ -e ${DIR_CONFIG}/config.json ]] && changeport
-            ;;
-        5|05)
-            [[ -e ${DIR_CONFIG}/config.json ]] && configtls
-            ;;
-        6|06)
-            [[ -e ${DIR_CONFIG}/config.json ]] && configproto
-            ;;
-        7|07)
-            [[ -e ${DIR_CONFIG}/config.json ]] && uninstallxray
-            ;;
-        0|00)
-            menu
-            ;;
-        *)
-            echo -e "\n${RED}Opção inválida!${NC}"
+        1) add_user ;;
+        2) remove_user ;;
+        3) show_status ;;
+        4) configure_port ;;
+        5) uninstall_xray ;;
+        0|00) conexao ;;
+        *) 
+            echo -e "${RED}Opção inválida!${SCOLOR}"
             sleep 2
-            fun_xraymanager
-            ;;
+            menu_xray
+        ;;
     esac
 }
 
 # Iniciar menu
-fun_xraymanager 
+check_root
+menu_xray 
